@@ -33,6 +33,8 @@ def detect_provider_type(base_url: str) -> str:
         return "openai"
     elif "api.cartesia.ai" in base_url:
         return "cartesia"
+    elif "api.elevenlabs.io" in base_url:
+        return "elevenlabs"
     elif ":8880" in base_url:
         return "kokoro"
     elif ":2022" in base_url:
@@ -110,6 +112,15 @@ class ProviderRegistry:
                 if provider_type == "openai":
                     models = ["gpt4o-mini-tts", "tts-1", "tts-1-hd"]
                     voices = ["alloy", "echo", "fable", "nova", "onyx", "shimmer"]
+                elif provider_type == "elevenlabs":
+                    # ElevenLabs accepts any voice name or ID in the URL path, so
+                    # seed the registry from the user's configured VOICEMODE_VOICES
+                    # list. Voice-first selection will then match whatever the user
+                    # put there (display name like "Rachel" or 20-char ID alike).
+                    models = [config.ELEVENLABS_MODEL, config.ELEVENLABS_FALLBACK_MODEL]
+                    voices = list(config.TTS_VOICES)
+                    if config.ELEVENLABS_VOICE_ID and config.ELEVENLABS_VOICE_ID not in voices:
+                        voices.insert(0, config.ELEVENLABS_VOICE_ID)
                 elif provider_type == "cartesia":
                     import re
                     uuid_re = re.compile(
@@ -133,9 +144,13 @@ class ProviderRegistry:
             # Initialize STT endpoints
             for url in STT_BASE_URLS:
                 provider_type = detect_provider_type(url)
+                if provider_type == "elevenlabs":
+                    stt_models = [config.ELEVENLABS_STT_MODEL]
+                else:
+                    stt_models = _default_stt_models(url)
                 self.registry["stt"][url] = EndpointInfo(
                     base_url=url,
-                    models=_default_stt_models(url),
+                    models=stt_models,
                     voices=[],  # STT doesn't have voices
                     provider_type=provider_type
                 )
@@ -189,6 +204,29 @@ class ProviderRegistry:
                 provider_type="cartesia",
                 last_check=datetime.now(timezone.utc).isoformat(),
                 last_error=None if config.CARTESIA_API_KEY else "CARTESIA_API_KEY not set",
+            )
+            return
+
+        # ElevenLabs uses a proprietary REST API — not OpenAI-compatible.
+        # Skip /v1/models probing (not supported) and populate from config defaults.
+        # TTS is dispatched via elevenlabs_tts.py at call time (both core.py sites).
+        # STT is dispatched via elevenlabs_stt.py (deferrable — see tasks.md).
+        if detect_provider_type(base_url) == "elevenlabs":
+            if service_type == "tts":
+                el_models = [config.ELEVENLABS_MODEL, config.ELEVENLABS_FALLBACK_MODEL]
+                el_voices = list(config.TTS_VOICES)
+                if config.ELEVENLABS_VOICE_ID and config.ELEVENLABS_VOICE_ID not in el_voices:
+                    el_voices.insert(0, config.ELEVENLABS_VOICE_ID)
+            else:
+                el_models = [config.ELEVENLABS_STT_MODEL]
+                el_voices = []
+            self.registry[service_type][base_url] = EndpointInfo(
+                base_url=base_url,
+                models=el_models,
+                voices=el_voices,
+                provider_type="elevenlabs",
+                last_check=datetime.now(timezone.utc).isoformat(),
+                last_error=None if config.ELEVENLABS_API_KEY else "ELEVENLABS_API_KEY is not set",
             )
             return
 
