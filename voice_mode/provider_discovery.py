@@ -113,12 +113,14 @@ class ProviderRegistry:
                     models = ["gpt4o-mini-tts", "tts-1", "tts-1-hd"]
                     voices = ["alloy", "echo", "fable", "nova", "onyx", "shimmer"]
                 elif provider_type == "elevenlabs":
-                    # ElevenLabs accepts any voice name or ID in the URL path, so
-                    # seed the registry from the user's configured VOICEMODE_VOICES
-                    # list. Voice-first selection will then match whatever the user
-                    # put there (display name like "Rachel" or 20-char ID alike).
+                    # Only include VOICEMODE_VOICES entries that are 20-char
+                    # alphanumeric ElevenLabs IDs — same filter Cartesia applies
+                    # for UUIDs. This prevents af_sky/alloy/etc. from matching
+                    # the ElevenLabs endpoint in voice-first selection.
+                    import re as _re
+                    el_id_re = _re.compile(r"^[A-Za-z0-9]{20}$")
                     models = [config.ELEVENLABS_MODEL, config.ELEVENLABS_FALLBACK_MODEL]
-                    voices = list(config.TTS_VOICES)
+                    voices = [v for v in config.TTS_VOICES if el_id_re.match(v)]
                     if config.ELEVENLABS_VOICE_ID and config.ELEVENLABS_VOICE_ID not in voices:
                         voices.insert(0, config.ELEVENLABS_VOICE_ID)
                 elif provider_type == "cartesia":
@@ -213,8 +215,10 @@ class ProviderRegistry:
         # STT is dispatched via elevenlabs_stt.py (deferrable — see tasks.md).
         if detect_provider_type(base_url) == "elevenlabs":
             if service_type == "tts":
+                import re as _re
+                el_id_re = _re.compile(r"^[A-Za-z0-9]{20}$")
                 el_models = [config.ELEVENLABS_MODEL, config.ELEVENLABS_FALLBACK_MODEL]
-                el_voices = list(config.TTS_VOICES)
+                el_voices = [v for v in config.TTS_VOICES if el_id_re.match(v)]
                 if config.ELEVENLABS_VOICE_ID and config.ELEVENLABS_VOICE_ID not in el_voices:
                     el_voices.insert(0, config.ELEVENLABS_VOICE_ID)
             else:
